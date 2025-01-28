@@ -127,7 +127,7 @@ impl Cidr {
                 prefix_len: netmask.count_ones() as u8,
             })
         } else {
-            Err(Error)
+            Err(Error::BadPacket)
         }
     }
 
@@ -253,13 +253,13 @@ impl<T: AsRef<[u8]>> Packet<T> {
     pub fn check_len(&self) -> Result<()> {
         let len = self.buffer.as_ref().len();
         if len < field::DST_ADDR.end {
-            Err(Error)
+            Err(Error::Truncated)
         } else if len < self.header_len() as usize {
-            Err(Error)
+            Err(Error::Truncated)
         } else if self.header_len() as u16 > self.total_len() {
-            Err(Error)
+            Err(Error::Truncated)
         } else if len < self.total_len() as usize {
-            Err(Error)
+            Err(Error::Truncated)
         } else {
             Ok(())
         }
@@ -557,17 +557,17 @@ impl Repr {
         packet.check_len()?;
         // Version 4 is expected.
         if packet.version() != 4 {
-            return Err(Error);
+            return Err(Error::BadPacket);
         }
         // Valid checksum is expected.
         if checksum_caps.ipv4.rx() && !packet.verify_checksum() {
-            return Err(Error);
+            return Err(Error::ChecksumInvalid);
         }
 
         #[cfg(not(feature = "proto-ipv4-fragmentation"))]
         // We do not support fragmentation.
         if packet.more_frags() || packet.frag_offset() != 0 {
-            return Err(Error);
+            return Err(Error::Fragmented);
         }
 
         let payload_len = packet.total_len() as usize - packet.header_len() as usize;

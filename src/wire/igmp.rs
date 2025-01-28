@@ -73,7 +73,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
     pub fn check_len(&self) -> Result<()> {
         let len = self.buffer.as_ref().len();
         if len < field::GROUP_ADDRESS.end {
-            Err(Error)
+            Err(Error::Truncated)
         } else {
             Ok(())
         }
@@ -210,7 +210,7 @@ impl Repr {
         // Check if the address is 0.0.0.0 or multicast
         let addr = packet.group_addr();
         if !addr.is_unspecified() && !addr.is_multicast() {
-            return Err(Error);
+            return Err(Error::BadPacket);
         }
 
         // construct a packet based on the Type field
@@ -243,7 +243,7 @@ impl Repr {
                     version: IgmpVersion::Version1,
                 })
             }
-            _ => Err(Error),
+            _ => Err(Error::BadPacket),
         }
     }
 

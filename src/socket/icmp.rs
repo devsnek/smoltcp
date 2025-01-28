@@ -80,23 +80,12 @@ impl std::error::Error for RecvError {}
 /// more details.
 ///
 /// [IcmpSocket::bind]: struct.IcmpSocket.html#method.bind
-#[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Endpoint {
-    #[default]
     Unspecified,
     Ident(u16),
     Udp(IpListenEndpoint),
-}
-
-impl Endpoint {
-    pub fn is_specified(&self) -> bool {
-        match *self {
-            Endpoint::Ident(_) => true,
-            Endpoint::Udp(endpoint) => endpoint.port != 0,
-            Endpoint::Unspecified => false,
-        }
-    }
 }
 
 /// An ICMP packet metadata.
@@ -119,7 +108,7 @@ pub struct Socket<'a> {
     rx_buffer: PacketBuffer<'a>,
     tx_buffer: PacketBuffer<'a>,
     /// The endpoint this socket is communicating with
-    endpoint: Endpoint,
+    endpoint: Option<Endpoint>,
     /// The time-to-live (IPv4) or hop limit (IPv6) value used in outgoing packets.
     hop_limit: Option<u8>,
     #[cfg(feature = "async")]
@@ -261,15 +250,12 @@ impl<'a> Socket<'a> {
     /// [recv]: #method.recv
     pub fn bind<T: Into<Endpoint>>(&mut self, endpoint: T) -> Result<(), BindError> {
         let endpoint = endpoint.into();
-        if !endpoint.is_specified() {
-            return Err(BindError::Unaddressable);
-        }
 
         if self.is_open() {
             return Err(BindError::InvalidState);
         }
 
-        self.endpoint = endpoint;
+        self.endpoint = Some(endpoint);
 
         #[cfg(feature = "async")]
         {
@@ -319,7 +305,7 @@ impl<'a> Socket<'a> {
     /// Check whether the socket is open.
     #[inline]
     pub fn is_open(&self) -> bool {
-        self.endpoint != Endpoint::Unspecified
+        self.endpoint.is_some()
     }
 
     /// Enqueue a packet to be sent to a given remote address, and return a pointer
@@ -432,7 +418,10 @@ impl<'a> Socket<'a> {
         ip_repr: &Ipv4Repr,
         icmp_repr: &Icmpv4Repr,
     ) -> bool {
-        match (&self.endpoint, icmp_repr) {
+        let Some(endpoint) = &self.endpoint else {
+            return false;
+        };
+        match (endpoint, icmp_repr) {
             // If we are bound to ICMP errors associated to a UDP port, only
             // accept Destination Unreachable or Time Exceeded messages with
             // the data containing a UDP packet send from the local port we
@@ -460,6 +449,7 @@ impl<'a> Socket<'a> {
             | (&Endpoint::Ident(bound_ident), &Icmpv4Repr::EchoReply { ident, .. }) => {
                 ident == bound_ident
             }
+            (&Endpoint::Unspecified, _) => true,
             _ => false,
         }
     }
@@ -474,7 +464,10 @@ impl<'a> Socket<'a> {
         ip_repr: &Ipv6Repr,
         icmp_repr: &Icmpv6Repr,
     ) -> bool {
-        match (&self.endpoint, icmp_repr) {
+        let Some(endpoint) = &self.endpoint else {
+            return false;
+        };
+        match (endpoint, icmp_repr) {
             // If we are bound to ICMP errors associated to a UDP port, only
             // accept Destination Unreachable or Time Exceeded messages with
             // the data containing a UDP packet send from the local port we
@@ -502,6 +495,7 @@ impl<'a> Socket<'a> {
                 &Endpoint::Ident(bound_ident),
                 &Icmpv6Repr::EchoRequest { ident, .. } | &Icmpv6Repr::EchoReply { ident, .. },
             ) => ident == bound_ident,
+            (&Endpoint::Unspecified, _) => true,
             _ => false,
         }
     }

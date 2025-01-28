@@ -57,11 +57,11 @@ impl<T: AsRef<[u8]>> Packet<T> {
     pub fn check_len(&self) -> Result<()> {
         let buffer_len = self.buffer.as_ref().len();
         if buffer_len < HEADER_LEN {
-            Err(Error)
+            Err(Error::TooShort)
         } else {
             let field_len = self.len() as usize;
             if buffer_len < field_len || field_len < HEADER_LEN {
-                Err(Error)
+                Err(Error::TooShort)
             } else {
                 Ok(())
             }
@@ -227,7 +227,7 @@ impl Repr {
 
         // Destination port cannot be omitted (but source port can be).
         if packet.dst_port() == 0 {
-            return Err(Error);
+            return Err(Error::BadPort);
         }
         // Valid checksum is expected...
         if checksum_caps.udp.rx() && !packet.verify_checksum(src_addr, dst_addr) {
@@ -235,7 +235,7 @@ impl Repr {
                 // ... except on UDP-over-IPv4, where it can be omitted.
                 #[cfg(feature = "proto-ipv4")]
                 (&IpAddress::Ipv4(_), &IpAddress::Ipv4(_)) if packet.checksum() == 0 => (),
-                _ => return Err(Error),
+                _ => return Err(Error::ChecksumInvalid),
             }
         }
 
@@ -402,7 +402,7 @@ mod test {
         let mut bytes = vec![0; 12];
         let mut packet = Packet::new_unchecked(&mut bytes);
         packet.set_len(4);
-        assert_eq!(packet.check_len(), Err(Error));
+        assert_eq!(packet.check_len(), Err(Error::TooShort));
     }
 
     #[test]

@@ -29,7 +29,7 @@ impl Version {
             4 => Ok(Version::Ipv4),
             #[cfg(feature = "proto-ipv6")]
             6 => Ok(Version::Ipv6),
-            _ => Err(Error),
+            _ => Err(Error::BadPacket),
         }
     }
 }

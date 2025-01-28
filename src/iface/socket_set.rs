@@ -117,6 +117,14 @@ impl<'a> SocketSet<'a> {
         }
     }
 
+    /// Get a mutable socket from the set by its handle, as mutable.
+    pub fn try_get_mut<T: AnySocket<'a>>(&mut self, handle: SocketHandle) -> Option<&mut T> {
+        self.sockets
+            .get_mut(handle.0)
+            .and_then(|s| s.inner.as_mut())
+            .and_then(|item| T::downcast_mut(&mut item.socket))
+    }
+
     /// Remove a socket from the set, without changing its state.
     ///
     /// # Panics

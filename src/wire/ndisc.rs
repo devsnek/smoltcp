@@ -7,7 +7,7 @@ use crate::wire::icmpv6::{field, Message, Packet};
 use crate::wire::RawHardwareAddress;
 use crate::wire::{Ipv6Address, Ipv6AddressExt};
 use crate::wire::{NdiscOption, NdiscOptionRepr};
-use crate::wire::{NdiscPrefixInformation, NdiscRedirectedHeader};
+use crate::wire::{NdiscPrefixInformation, NdiscRecursiveDns, NdiscRedirectedHeader};
 
 bitflags! {
     #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -204,6 +204,7 @@ pub enum Repr<'a> {
         lladdr: Option<RawHardwareAddress>,
         mtu: Option<u32>,
         prefix_info: Option<NdiscPrefixInformation>,
+        recursive_dns: Option<NdiscRecursiveDns<'a>>,
     },
     NeighborSolicit {
         target_addr: Ipv6Address,
@@ -232,8 +233,14 @@ impl<'a> Repr<'a> {
     {
         packet.check_len()?;
 
-        let (mut src_ll_addr, mut mtu, mut prefix_info, mut target_ll_addr, mut redirected_hdr) =
-            (None, None, None, None, None);
+        let (
+            mut src_ll_addr,
+            mut mtu,
+            mut prefix_info,
+            mut target_ll_addr,
+            mut redirected_hdr,
+            mut recursive_dns,
+        ) = (None, None, None, None, None, None);
 
         let mut offset = 0;
         while packet.payload().len() > offset {
@@ -247,13 +254,14 @@ impl<'a> Repr<'a> {
                     NdiscOptionRepr::PrefixInformation(prefix) => prefix_info = Some(prefix),
                     NdiscOptionRepr::RedirectedHeader(redirect) => redirected_hdr = Some(redirect),
                     NdiscOptionRepr::Mtu(m) => mtu = Some(m),
+                    NdiscOptionRepr::RecursiveDns(dns) => recursive_dns = Some(dns),
                     _ => {}
                 }
             }
 
             let len = pkt.data_len() as usize * 8;
             if len == 0 {
-                return Err(Error);
+                return Err(Error::Truncated);
             }
             offset += len;
         }
@@ -271,6 +279,7 @@ impl<'a> Repr<'a> {
                 lladdr: src_ll_addr,
                 mtu,
                 prefix_info,
+                recursive_dns,
             }),
             Message::NeighborSolicit => Ok(Repr::NeighborSolicit {
                 target_addr: packet.target_addr(),
@@ -287,7 +296,7 @@ impl<'a> Repr<'a> {
                 lladdr: src_ll_addr,
                 redirected_hdr,
             }),
-            _ => Err(Error),
+            _ => Err(Error::BadPacket),
         }
     }
 
@@ -303,6 +312,7 @@ impl<'a> Repr<'a> {
                 lladdr,
                 mtu,
                 prefix_info,
+                recursive_dns,
                 ..
             } => {
                 let mut offset = 0;
@@ -314,6 +324,9 @@ impl<'a> Repr<'a> {
                 }
                 if let Some(prefix_info) = prefix_info {
                     offset += NdiscOptionRepr::PrefixInformation(prefix_info).buffer_len();
+                }
+                if let Some(dns) = recursive_dns {
+                    offset += NdiscOptionRepr::RecursiveDns(dns).buffer_len();
                 }
                 field::RETRANS_TM.end + offset
             }
@@ -367,6 +380,7 @@ impl<'a> Repr<'a> {
                 lladdr,
                 mtu,
                 prefix_info,
+                recursive_dns,
             } => {
                 packet.set_msg_type(Message::RouterAdvert);
                 packet.set_msg_code(0);
@@ -391,7 +405,13 @@ impl<'a> Repr<'a> {
                 if let Some(prefix_info) = prefix_info {
                     let mut opt_pkt =
                         NdiscOption::new_unchecked(&mut packet.payload_mut()[offset..]);
-                    NdiscOptionRepr::PrefixInformation(prefix_info).emit(&mut opt_pkt)
+                    NdiscOptionRepr::PrefixInformation(prefix_info).emit(&mut opt_pkt);
+                    offset += NdiscOptionRepr::PrefixInformation(prefix_info).buffer_len();
+                }
+                if let Some(dns) = recursive_dns {
+                    let mut opt_pkt =
+                        NdiscOption::new_unchecked(&mut packet.payload_mut()[offset..]);
+                    NdiscOptionRepr::RecursiveDns(dns).emit(&mut opt_pkt);
                 }
             }
 

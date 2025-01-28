@@ -1,15 +1,14 @@
-use core::cmp::min;
 #[cfg(feature = "async")]
 use core::task::Waker;
 
-use heapless::Vec;
 use managed::ManagedSlice;
 
-use crate::config::{DNS_MAX_NAME_SIZE, DNS_MAX_RESULT_COUNT, DNS_MAX_SERVER_COUNT};
 use crate::socket::{Context, PollAt};
 use crate::time::{Duration, Instant};
 use crate::wire::dns::{Flags, Opcode, Packet, Question, Rcode, Record, RecordData, Repr, Type};
 use crate::wire::{self, IpAddress, IpProtocol, IpRepr, UdpRepr};
+
+use alloc::vec::Vec;
 
 #[cfg(feature = "async")]
 use super::WakerRegistration;
@@ -104,7 +103,7 @@ enum State {
 
 #[derive(Debug)]
 struct PendingQuery {
-    name: Vec<u8, DNS_MAX_NAME_SIZE>,
+    name: Vec<u8>,
     type_: Type,
 
     port: u16, // UDP port (src for request, dst for response)
@@ -127,7 +126,7 @@ pub enum MulticastDns {
 
 #[derive(Debug)]
 struct CompletedQuery {
-    addresses: Vec<IpAddress, DNS_MAX_RESULT_COUNT>,
+    addresses: Vec<IpAddress>,
 }
 
 /// A handle to an in-progress DNS query.
@@ -140,7 +139,7 @@ pub struct QueryHandle(usize);
 /// packet buffers.
 #[derive(Debug)]
 pub struct Socket<'a> {
-    servers: Vec<IpAddress, DNS_MAX_SERVER_COUNT>,
+    servers: Vec<IpAddress>,
     queries: ManagedSlice<'a, Option<DnsQuery>>,
 
     /// The time-to-live (IPv4) or hop limit (IPv6) value used in outgoing packets.
@@ -155,10 +154,8 @@ impl<'a> Socket<'a> {
     where
         Q: Into<ManagedSlice<'a, Option<DnsQuery>>>,
     {
-        let truncated_servers = &servers[..min(servers.len(), DNS_MAX_SERVER_COUNT)];
-
         Socket {
-            servers: Vec::from_slice(truncated_servers).unwrap(),
+            servers: Vec::from(servers),
             queries: queries.into(),
             hop_limit: None,
         }
@@ -168,12 +165,7 @@ impl<'a> Socket<'a> {
     ///
     /// Truncates the server list if `servers.len() > MAX_SERVER_COUNT`
     pub fn update_servers(&mut self, servers: &[IpAddress]) {
-        if servers.len() > DNS_MAX_SERVER_COUNT {
-            net_trace!("Max DNS Servers exceeded. Increase MAX_SERVER_COUNT");
-            self.servers = Vec::from_slice(&servers[..DNS_MAX_SERVER_COUNT]).unwrap();
-        } else {
-            self.servers = Vec::from_slice(servers).unwrap();
-        }
+        self.servers = Vec::from(servers);
     }
 
     /// Return the time-to-live (IPv4) or hop limit (IPv6) value used in outgoing packets.
@@ -244,7 +236,7 @@ impl<'a> Socket<'a> {
             name = &name[..name.len() - 1];
         }
 
-        let mut raw_name: Vec<u8, DNS_MAX_NAME_SIZE> = Vec::new();
+        let mut raw_name: Vec<u8> = Vec::new();
 
         let mut mdns = MulticastDns::Disabled;
         #[cfg(feature = "socket-mdns")]
@@ -264,18 +256,12 @@ impl<'a> Socket<'a> {
             }
 
             // Push label
-            raw_name
-                .push(s.len() as u8)
-                .map_err(|_| StartQueryError::NameTooLong)?;
-            raw_name
-                .extend_from_slice(s)
-                .map_err(|_| StartQueryError::NameTooLong)?;
+            raw_name.push(s.len() as u8);
+            raw_name.extend_from_slice(s);
         }
 
         // Push terminator.
-        raw_name
-            .push(0x00)
-            .map_err(|_| StartQueryError::NameTooLong)?;
+        raw_name.push(0x00);
 
         self.start_query_raw(cx, &raw_name, query_type, mdns)
     }
@@ -295,7 +281,7 @@ impl<'a> Socket<'a> {
 
         self.queries[handle.0] = Some(DnsQuery {
             state: State::Pending(PendingQuery {
-                name: Vec::from_slice(raw_name).map_err(|_| StartQueryError::NameTooLong)?,
+                name: Vec::from(raw_name),
                 type_: query_type,
                 txid: cx.rand().rand_u16(),
                 port: cx.rand().rand_source_port(),
@@ -320,7 +306,7 @@ impl<'a> Socket<'a> {
     pub fn get_query_result(
         &mut self,
         handle: QueryHandle,
-    ) -> Result<Vec<IpAddress, DNS_MAX_RESULT_COUNT>, GetQueryResultError> {
+    ) -> Result<Vec<IpAddress>, GetQueryResultError> {
         let slot = &mut self.queries[handle.0];
         let q = slot.as_mut().unwrap();
         match &mut q.state {
@@ -484,16 +470,12 @@ impl<'a> Socket<'a> {
                         #[cfg(feature = "proto-ipv4")]
                         RecordData::A(addr) => {
                             net_trace!("A: {:?}", addr);
-                            if addresses.push(addr.into()).is_err() {
-                                net_trace!("too many addresses in response, ignoring {:?}", addr);
-                            }
+                            addresses.push(addr.into());
                         }
                         #[cfg(feature = "proto-ipv6")]
                         RecordData::Aaaa(addr) => {
                             net_trace!("AAAA: {:?}", addr);
-                            if addresses.push(addr.into()).is_err() {
-                                net_trace!("too many addresses in response, ignoring {:?}", addr);
-                            }
+                            addresses.push(addr.into());
                         }
                         RecordData::Cname(name) => {
                             net_trace!("CNAME: {:?}", name);
@@ -505,10 +487,7 @@ impl<'a> Socket<'a> {
                             // records for the CNAME when we parse them later.
                             // I believe it's mandatory the CNAME results MUST come *after* in the
                             // packet, so it's enough to do one linear pass over it.
-                            if copy_name(&mut pq.name, p.parse_name(name)).is_err() {
-                                net_trace!("dns answer cname malformed");
-                                return;
-                            }
+                            copy_name(&mut pq.name, p.parse_name(name)).ok();
                         }
                         RecordData::Other(type_, data) => {
                             net_trace!("unknown: {:?} {:?}", type_, data)
@@ -694,20 +673,20 @@ fn eq_names<'a>(
     }
 }
 
-fn copy_name<'a, const N: usize>(
-    dest: &mut Vec<u8, N>,
+fn copy_name<'a>(
+    dest: &mut Vec<u8>,
     name: impl Iterator<Item = wire::Result<&'a [u8]>>,
 ) -> Result<(), wire::Error> {
     dest.truncate(0);
 
     for label in name {
         let label = label?;
-        dest.push(label.len() as u8).map_err(|_| wire::Error)?;
-        dest.extend_from_slice(label).map_err(|_| wire::Error)?;
+        dest.push(label.len() as u8);
+        dest.extend_from_slice(label);
     }
 
     // Write terminator 0x00
-    dest.push(0).map_err(|_| wire::Error)?;
+    dest.push(0);
 
     Ok(())
 }

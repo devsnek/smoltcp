@@ -192,7 +192,7 @@ impl<T: AsRef<[u8]>> AddressRecord<T> {
     pub fn check_len(&self) -> Result<()> {
         let len = self.buffer.as_ref().len();
         if len < field::RECORD_MCAST_ADDR.end {
-            Err(Error)
+            Err(Error::Truncated)
         } else {
             Ok(())
         }
@@ -387,7 +387,7 @@ impl<'a> Repr<'a> {
                 nr_mcast_addr_rcrds: packet.nr_mcast_addr_rcrds(),
                 data: packet.payload(),
             }),
-            _ => Err(Error),
+            _ => Err(Error::BadPacket),
         }
     }
 

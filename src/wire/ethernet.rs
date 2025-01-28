@@ -135,7 +135,7 @@ impl<T: AsRef<[u8]>> Frame<T> {
     pub fn check_len(&self) -> Result<()> {
         let len = self.buffer.as_ref().len();
         if len < HEADER_LEN {
-            Err(Error)
+            Err(Error::Truncated)
         } else {
             Ok(())
         }

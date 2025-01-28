@@ -57,12 +57,12 @@ impl<T: AsRef<[u8]>> Header<T> {
 
         let len = data.len();
         if len < field::MIN_HEADER_SIZE {
-            return Err(Error);
+            return Err(Error::Truncated);
         }
 
         let of = field::PAYLOAD(data[field::LENGTH]);
         if len < of.end {
-            return Err(Error);
+            return Err(Error::Truncated);
         }
 
         Ok(())

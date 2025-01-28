@@ -207,7 +207,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
     pub fn check_len(&self) -> Result<()> {
         let len = self.buffer.as_ref().len();
         if len < field::HEADER_END {
-            Err(Error)
+            Err(Error::Truncated)
         } else {
             Ok(())
         }
@@ -403,7 +403,7 @@ impl<'a> Repr<'a> {
 
         // Valid checksum is expected.
         if checksum_caps.icmpv4.rx() && !packet.verify_checksum() {
-            return Err(Error);
+            return Err(Error::ChecksumInvalid);
         }
 
         match (packet.msg_type(), packet.msg_code()) {
@@ -426,7 +426,7 @@ impl<'a> Repr<'a> {
                 // RFC 792 requires exactly eight bytes to be returned.
                 // We allow more, since there isn't a reason not to, but require at least eight.
                 if payload.len() < 8 {
-                    return Err(Error);
+                    return Err(Error::Truncated);
                 }
 
                 Ok(Repr::DstUnreachable {
@@ -449,7 +449,7 @@ impl<'a> Repr<'a> {
                 // RFC 792 requires exactly eight bytes to be returned.
                 // We allow more, since there isn't a reason not to, but require at least eight.
                 if payload.len() < 8 {
-                    return Err(Error);
+                    return Err(Error::Truncated);
                 }
 
                 Ok(Repr::TimeExceeded {
@@ -465,7 +465,7 @@ impl<'a> Repr<'a> {
                 })
             }
 
-            _ => Err(Error),
+            _ => Err(Error::BadPacket),
         }
     }
 

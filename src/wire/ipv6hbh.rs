@@ -32,7 +32,7 @@ impl<T: AsRef<[u8]>> Header<T> {
     /// [set_header_len]: #method.set_header_len
     pub fn check_len(&self) -> Result<()> {
         if self.buffer.as_ref().is_empty() {
-            return Err(Error);
+            return Err(Error::Truncated);
         }
 
         Ok(())

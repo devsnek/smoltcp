@@ -55,7 +55,7 @@ impl<T: AsRef<[u8]>> Header<T> {
         let len = data.len();
 
         if len < field::IDENT.end {
-            Err(Error)
+            Err(Error::TooShort)
         } else {
             Ok(())
         }

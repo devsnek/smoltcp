@@ -1,12 +1,12 @@
 use core::result::Result;
-use heapless::{LinearMap, Vec};
 
 #[cfg(any(feature = "proto-ipv4", feature = "proto-ipv6"))]
 use super::{check, IpPayload, Packet};
 use super::{Interface, InterfaceInner};
-use crate::config::{IFACE_MAX_ADDR_COUNT, IFACE_MAX_MULTICAST_GROUP_COUNT};
 use crate::phy::{Device, PacketMeta};
 use crate::wire::*;
+use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 
 /// Error type for `join_multicast_group`, `leave_multicast_group`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,7 +57,7 @@ enum GroupState {
 }
 
 pub(crate) struct State {
-    groups: LinearMap<IpAddress, GroupState, IFACE_MAX_MULTICAST_GROUP_COUNT>,
+    groups: BTreeMap<IpAddress, GroupState>,
     /// When to report for (all or) the next multicast group membership via IGMP
     #[cfg(feature = "proto-ipv4")]
     igmp_report_state: IgmpReportState,
@@ -68,7 +68,7 @@ pub(crate) struct State {
 impl State {
     pub(crate) fn new() -> Self {
         Self {
-            groups: LinearMap::new(),
+            groups: BTreeMap::new(),
             #[cfg(feature = "proto-ipv4")]
             igmp_report_state: IgmpReportState::Inactive,
             #[cfg(feature = "proto-ipv6")]
@@ -121,8 +121,7 @@ impl Interface {
             self.inner
                 .multicast
                 .groups
-                .insert(addr, GroupState::Joining)
-                .map_err(|_| MulticastError::GroupTableFull)?;
+                .insert(addr, GroupState::Joining);
         }
         Ok(())
     }
@@ -159,7 +158,7 @@ impl Interface {
     #[cfg(feature = "proto-ipv6")]
     pub(super) fn update_solicited_node_groups(&mut self) {
         // Remove old solicited-node multicast addresses
-        let removals: Vec<_, IFACE_MAX_MULTICAST_GROUP_COUNT> = self
+        let removals: Vec<_> = self
             .inner
             .multicast
             .groups
@@ -171,7 +170,7 @@ impl Interface {
             let _ = self.leave_multicast_group(removal);
         }
 
-        let cidrs: Vec<IpCidr, IFACE_MAX_ADDR_COUNT> = Vec::from_slice(self.ip_addrs()).unwrap();
+        let cidrs: Vec<IpCidr> = Vec::from(self.ip_addrs());
         for cidr in cidrs {
             if let IpCidr::Ipv6(cidr) = cidr {
                 let _ = self.join_multicast_group(cidr.address().solicited_node());
@@ -361,7 +360,7 @@ impl Interface {
                         #[allow(unreachable_patterns)]
                         _ => None,
                     })
-                    .collect::<heapless::Vec<_, IFACE_MAX_MULTICAST_GROUP_COUNT>>();
+                    .collect::<Vec<_>>();
                 if let Some(pkt) = self.inner.mldv2_report_packet(&records) {
                     if let Some(tx_token) = device.transmit(self.inner.now) {
                         self.inner

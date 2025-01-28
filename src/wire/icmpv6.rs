@@ -276,7 +276,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
         let len = self.buffer.as_ref().len();
 
         if len < 4 {
-            return Err(Error);
+            return Err(Error::Truncated);
         }
 
         match self.msg_type() {
@@ -294,7 +294,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
             | Message::Redirect
             | Message::MldReport => {
                 if len < field::HEADER_END || len < self.header_len() {
-                    return Err(Error);
+                    return Err(Error::Truncated);
                 }
             }
             #[cfg(feature = "proto-rpl")]
@@ -302,37 +302,37 @@ impl<T: AsRef<[u8]>> Packet<T> {
                 super::rpl::RplControlMessage::DodagInformationSolicitation => {
                     // TODO(thvdveld): replace magic number
                     if len < 6 {
-                        return Err(Error);
+                        return Err(Error::Truncated);
                     }
                 }
                 super::rpl::RplControlMessage::DodagInformationObject => {
                     // TODO(thvdveld): replace magic number
                     if len < 28 {
-                        return Err(Error);
+                        return Err(Error::Truncated);
                     }
                 }
                 super::rpl::RplControlMessage::DestinationAdvertisementObject => {
                     // TODO(thvdveld): replace magic number
                     if len < 8 || (self.dao_dodag_id_present() && len < 24) {
-                        return Err(Error);
+                        return Err(Error::Truncated);
                     }
                 }
                 super::rpl::RplControlMessage::DestinationAdvertisementObjectAck => {
                     // TODO(thvdveld): replace magic number
                     if len < 8 || (self.dao_dodag_id_present() && len < 24) {
-                        return Err(Error);
+                        return Err(Error::Truncated);
                     }
                 }
                 super::rpl::RplControlMessage::SecureDodagInformationSolicitation
                 | super::rpl::RplControlMessage::SecureDodagInformationObject
                 | super::rpl::RplControlMessage::SecureDestinationAdvertisementObject
                 | super::rpl::RplControlMessage::SecureDestinationAdvertisementObjectAck
-                | super::rpl::RplControlMessage::ConsistencyCheck => return Err(Error),
-                super::rpl::RplControlMessage::Unknown(_) => return Err(Error),
+                | super::rpl::RplControlMessage::ConsistencyCheck => return Err(Error::Truncated),
+                super::rpl::RplControlMessage::Unknown(_) => return Err(Error::Truncated),
             },
             #[cfg(not(feature = "proto-rpl"))]
-            Message::RplControl => return Err(Error),
-            Message::Unknown(_) => return Err(Error),
+            Message::RplControl => return Err(Error::Truncated),
+            Message::Unknown(_) => return Err(Error::Truncated),
         }
 
         Ok(())
@@ -634,7 +634,7 @@ impl<'a> Repr<'a> {
             let ip_packet = if packet.payload().len() >= IPV6_HEADER_LEN {
                 Ipv6Packet::new_unchecked(packet.payload())
             } else {
-                return Err(Error);
+                return Err(Error::Truncated);
             };
 
             let payload = &packet.payload()[ip_packet.header_len()..];
@@ -649,7 +649,7 @@ impl<'a> Repr<'a> {
         }
         // Valid checksum is expected.
         if checksum_caps.icmpv6.rx() && !packet.verify_checksum(src_addr, dst_addr) {
-            return Err(Error);
+            return Err(Error::ChecksumInvalid);
         }
 
         match (packet.msg_type(), packet.msg_code()) {
@@ -701,7 +701,7 @@ impl<'a> Repr<'a> {
             (msg_type, 0) if msg_type.is_mld() => MldRepr::parse(packet).map(Repr::Mld),
             #[cfg(feature = "proto-rpl")]
             (Message::RplControl, _) => RplRepr::parse(packet).map(Repr::Rpl),
-            _ => Err(Error),
+            _ => Err(Error::BadPacket),
         }
     }
 

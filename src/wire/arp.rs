@@ -92,9 +92,9 @@ impl<T: AsRef<[u8]>> Packet<T> {
     pub fn check_len(&self) -> Result<()> {
         let len = self.buffer.as_ref().len();
         if len < field::OPER.end {
-            Err(Error)
+            Err(Error::Truncated)
         } else if len < field::TPA(self.hardware_len(), self.protocol_len()).end {
-            Err(Error)
+            Err(Error::Truncated)
         } else {
             Ok(())
         }
@@ -285,7 +285,7 @@ impl Repr {
                 target_hardware_addr: EthernetAddress::from_bytes(packet.target_hardware_addr()),
                 target_protocol_addr: Ipv4Address::from_bytes(packet.target_protocol_addr()),
             }),
-            _ => Err(Error),
+            _ => Err(Error::BadPacket),
         }
     }
 

@@ -151,12 +151,12 @@ impl<T: AsRef<[u8]>> Header<T> {
     pub fn check_len(&self) -> Result<()> {
         let len = self.buffer.as_ref().len();
         if len < field::MIN_HEADER_SIZE {
-            return Err(Error);
+            return Err(Error::Truncated);
         }
 
         match self.routing_type() {
-            Type::Type2 if len < field::HOME_ADDRESS.end => return Err(Error),
-            Type::Rpl if len < field::ADDRESSES => return Err(Error),
+            Type::Type2 if len < field::HOME_ADDRESS.end => return Err(Error::TooShort),
+            Type::Rpl if len < field::ADDRESSES => return Err(Error::TooShort),
             _ => (),
         }
 
@@ -390,7 +390,7 @@ impl<'a> Repr<'a> {
                 addresses: header.addresses(),
             }),
 
-            _ => Err(Error),
+            _ => Err(Error::BadPacket),
         }
     }
 

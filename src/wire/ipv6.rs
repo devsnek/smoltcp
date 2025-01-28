@@ -384,7 +384,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
     pub fn check_len(&self) -> Result<()> {
         let len = self.buffer.as_ref().len();
         if len < field::DST_ADDR.end || len < self.total_len() {
-            Err(Error)
+            Err(Error::Truncated)
         } else {
             Ok(())
         }
@@ -591,7 +591,7 @@ impl Repr {
         // Ensure basic accessors will work
         packet.check_len()?;
         if packet.version() != 6 {
-            return Err(Error);
+            return Err(Error::BadPacket);
         }
         Ok(Repr {
             src_addr: packet.src_addr(),

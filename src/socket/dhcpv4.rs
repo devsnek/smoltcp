@@ -1,16 +1,14 @@
-#[cfg(feature = "async")]
-use core::task::Waker;
-
 use crate::iface::Context;
 use crate::time::{Duration, Instant};
 use crate::wire::dhcpv4::field as dhcpv4_field;
 use crate::wire::{
     DhcpMessageType, DhcpPacket, DhcpRepr, IpAddress, IpProtocol, Ipv4Address, Ipv4AddressExt,
-    Ipv4Cidr, Ipv4Repr, UdpRepr, DHCP_CLIENT_PORT, DHCP_MAX_DNS_SERVER_COUNT, DHCP_SERVER_PORT,
-    UDP_HEADER_LEN,
+    Ipv4Cidr, Ipv4Repr, UdpRepr, DHCP_CLIENT_PORT, DHCP_SERVER_PORT, UDP_HEADER_LEN,
 };
 use crate::wire::{DhcpOption, HardwareAddress};
-use heapless::Vec;
+use alloc::vec::Vec;
+#[cfg(feature = "async")]
+use core::task::Waker;
 
 #[cfg(feature = "async")]
 use super::WakerRegistration;
@@ -38,7 +36,7 @@ pub struct Config<'a> {
     /// match the DHCP server's address.
     pub router: Option<Ipv4Address>,
     /// DNS servers
-    pub dns_servers: Vec<Ipv4Address, DHCP_MAX_DNS_SERVER_COUNT>,
+    pub dns_servers: Vec<Ipv4Address>,
     /// Received DHCP packet
     pub packet: Option<DhcpPacket<&'a [u8]>>,
 }
@@ -485,9 +483,7 @@ impl<'a> Socket<'a> {
             .flatten()
             .filter(|s| s.x_is_unicast())
             .for_each(|a| {
-                // This will never produce an error, as both the arrays and `dns_servers`
-                // have length DHCP_MAX_DNS_SERVER_COUNT
-                dns_servers.push(*a).ok();
+                dns_servers.push(*a);
             });
 
         let config = Config {
@@ -1006,7 +1002,7 @@ mod test {
             your_ip: MY_IP,
             router: Some(SERVER_IP),
             subnet_mask: Some(MASK_24),
-            dns_servers: Some(Vec::from_slice(DNS_IPS).unwrap()),
+            dns_servers: Some(Vec::from_slice(DNS_IPS)),
             lease_duration: Some(1000),
 
             ..DHCP_DEFAULT

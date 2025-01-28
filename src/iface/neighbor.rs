@@ -1,11 +1,9 @@
 // Heads up! Before working on this file you should read, at least,
 // the parts of RFC 1122 that discuss ARP.
 
-use heapless::LinearMap;
-
-use crate::config::IFACE_NEIGHBOR_CACHE_COUNT;
 use crate::time::{Duration, Instant};
 use crate::wire::{HardwareAddress, IpAddress};
+use alloc::collections::BTreeMap;
 
 /// A cached neighbor.
 ///
@@ -44,7 +42,7 @@ impl Answer {
 /// A neighbor cache backed by a map.
 #[derive(Debug)]
 pub struct Cache {
-    storage: LinearMap<IpAddress, Neighbor, IFACE_NEIGHBOR_CACHE_COUNT>,
+    storage: BTreeMap<IpAddress, Neighbor>,
     silent_until: Instant,
 }
 
@@ -58,7 +56,7 @@ impl Cache {
     /// Create a cache.
     pub fn new() -> Self {
         Self {
-            storage: LinearMap::new(),
+            storage: BTreeMap::new(),
             silent_until: Instant::from_millis(0),
         }
     }
@@ -106,8 +104,26 @@ impl Cache {
             expires_at,
             hardware_addr,
         };
+
+        if self.storage.len() > 128 {
+            // If we're going down this branch, it means the cache is full, and we need to evict an entry.
+            let old_protocol_addr = *self
+                .storage
+                .iter()
+                .min_by_key(|(_, neighbor)| neighbor.expires_at)
+                .expect("empty neighbor cache storage")
+                .0;
+
+            let old_neighbor = self.storage.remove(&old_protocol_addr).unwrap();
+            net_trace!(
+                "evicted {} => {}",
+                old_protocol_addr,
+                old_neighbor.hardware_addr
+            );
+        }
+
         match self.storage.insert(protocol_addr, neighbor) {
-            Ok(Some(old_neighbor)) => {
+            Some(old_neighbor) => {
                 if old_neighbor.hardware_addr != hardware_addr {
                     net_trace!(
                         "replaced {} => {} (was {})",
@@ -117,32 +133,8 @@ impl Cache {
                     );
                 }
             }
-            Ok(None) => {
+            None => {
                 net_trace!("filled {} => {} (was empty)", protocol_addr, hardware_addr);
-            }
-            Err((protocol_addr, neighbor)) => {
-                // If we're going down this branch, it means the cache is full, and we need to evict an entry.
-                let old_protocol_addr = *self
-                    .storage
-                    .iter()
-                    .min_by_key(|(_, neighbor)| neighbor.expires_at)
-                    .expect("empty neighbor cache storage")
-                    .0;
-
-                let _old_neighbor = self.storage.remove(&old_protocol_addr).unwrap();
-                match self.storage.insert(protocol_addr, neighbor) {
-                    Ok(None) => {
-                        net_trace!(
-                            "filled {} => {} (evicted {} => {})",
-                            protocol_addr,
-                            hardware_addr,
-                            old_protocol_addr,
-                            _old_neighbor.hardware_addr
-                        );
-                    }
-                    // We've covered everything else above.
-                    _ => unreachable!(),
-                }
             }
         }
     }

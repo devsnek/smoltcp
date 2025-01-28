@@ -260,8 +260,8 @@ pub use self::ndisc::{
 ))]
 pub use self::ndiscoption::{
     NdiscOption, PrefixInfoFlags as NdiscPrefixInfoFlags,
-    PrefixInformation as NdiscPrefixInformation, RedirectedHeader as NdiscRedirectedHeader,
-    Repr as NdiscOptionRepr, Type as NdiscOptionType,
+    PrefixInformation as NdiscPrefixInformation, RecursiveDns as NdiscRecursiveDns,
+    RedirectedHeader as NdiscRedirectedHeader, Repr as NdiscOptionRepr, Type as NdiscOptionType,
 };
 
 #[cfg(feature = "proto-ipv6")]
@@ -302,7 +302,15 @@ pub use self::ipsec_esp::{Packet as IpSecEspPacket, Repr as IpSecEspRepr};
 /// Either it is malformed, or it is not supported by smoltcp.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct Error;
+pub enum Error {
+    Truncated,
+    ChecksumInvalid,
+    TooShort,
+    BadPort,
+    BadPacket,
+    BadControl,
+    Fragmented,
+}
 
 #[cfg(feature = "std")]
 impl std::error::Error for Error {}
@@ -509,7 +517,7 @@ impl RawHardwareAddress {
             #[cfg(feature = "medium-ethernet")]
             Medium::Ethernet => {
                 if self.len() != 6 {
-                    return Err(Error);
+                    return Err(Error::BadPacket);
                 }
                 Ok(HardwareAddress::Ethernet(EthernetAddress::from_bytes(
                     self.as_bytes(),
@@ -518,7 +526,7 @@ impl RawHardwareAddress {
             #[cfg(feature = "medium-ieee802154")]
             Medium::Ieee802154 => {
                 if self.len() != 8 {
-                    return Err(Error);
+                    return Err(Error::BadPacket);
                 }
                 Ok(HardwareAddress::Ieee802154(Ieee802154Address::from_bytes(
                     self.as_bytes(),

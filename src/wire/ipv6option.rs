@@ -165,7 +165,7 @@ impl<T: AsRef<[u8]>> Ipv6Option<T> {
         let len = data.len();
 
         if len < field::LENGTH {
-            return Err(Error);
+            return Err(Error::TooShort);
         }
 
         if self.option_type() == Type::Pad1 {
@@ -173,13 +173,13 @@ impl<T: AsRef<[u8]>> Ipv6Option<T> {
         }
 
         if len == field::LENGTH {
-            return Err(Error);
+            return Err(Error::TooShort);
         }
 
         let df = field::DATA(data[field::LENGTH]);
 
         if len < df.end {
-            return Err(Error);
+            return Err(Error::TooShort);
         }
 
         Ok(())
@@ -297,7 +297,7 @@ impl<'a> Repr<'a> {
                     let raw = NetworkEndian::read_u16(opt.data());
                     Ok(Repr::RouterAlert(RouterAlert::from(raw)))
                 } else {
-                    Err(Error)
+                    Err(Error::BadPacket)
                 }
             }
             #[cfg(feature = "proto-rpl")]

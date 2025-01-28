@@ -103,7 +103,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
     pub fn check_len(&self) -> Result<()> {
         let len = self.buffer.as_ref().len();
         if len < field::HEADER_END {
-            Err(Error)
+            Err(Error::Truncated)
         } else {
             Ok(())
         }
@@ -166,14 +166,14 @@ impl<T: AsRef<[u8]>> Packet<T> {
 
         iter::from_fn(move || loop {
             if bytes.is_empty() {
-                return Some(Err(Error));
+                return Some(Err(Error::BadPacket));
             }
             match bytes[0] {
                 0x00 => return None,
                 x if x & 0xC0 == 0x00 => {
                     let len = (x & 0x3F) as usize;
                     if bytes.len() < 1 + len {
-                        return Some(Err(Error));
+                        return Some(Err(Error::BadPacket));
                     }
                     let label = &bytes[1..1 + len];
                     bytes = &bytes[1 + len..];
@@ -181,12 +181,12 @@ impl<T: AsRef<[u8]>> Packet<T> {
                 }
                 x if x & 0xC0 == 0xC0 => {
                     if bytes.len() < 2 {
-                        return Some(Err(Error));
+                        return Some(Err(Error::BadPacket));
                     }
                     let y = bytes[1];
                     let ptr = ((x & 0x3F) as usize) << 8 | (y as usize);
                     if packet.len() <= ptr {
-                        return Some(Err(Error));
+                        return Some(Err(Error::BadPacket));
                     }
 
                     // RFC1035 says: "In this scheme, an entire domain name or a list of labels at
@@ -204,7 +204,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
                     bytes = &packet[ptr..];
                     packet = &packet[..ptr];
                 }
-                _ => return Some(Err(Error)),
+                _ => return Some(Err(Error::BadPacket)),
             }
         })
     }
@@ -262,24 +262,24 @@ fn parse_name_part<'a>(
     mut f: impl FnMut(&'a [u8]),
 ) -> Result<(&'a [u8], Option<usize>)> {
     loop {
-        let x = *bytes.first().ok_or(Error)?;
+        let x = *bytes.first().ok_or(Error::BadPacket)?;
         bytes = &bytes[1..];
         match x {
             0x00 => return Ok((bytes, None)),
             x if x & 0xC0 == 0x00 => {
                 let len = (x & 0x3F) as usize;
-                let label = bytes.get(..len).ok_or(Error)?;
+                let label = bytes.get(..len).ok_or(Error::BadPacket)?;
                 bytes = &bytes[len..];
                 f(label);
             }
             x if x & 0xC0 == 0xC0 => {
-                let y = *bytes.first().ok_or(Error)?;
+                let y = *bytes.first().ok_or(Error::BadPacket)?;
                 bytes = &bytes[1..];
 
                 let ptr = ((x & 0x3F) as usize) << 8 | (y as usize);
                 return Ok((bytes, Some(ptr)));
             }
-            _ => return Err(Error),
+            _ => return Err(Error::BadPacket),
         }
     }
 }
@@ -297,14 +297,14 @@ impl<'a> Question<'a> {
         let name = &buffer[..buffer.len() - rest.len()];
 
         if rest.len() < 4 {
-            return Err(Error);
+            return Err(Error::BadPacket);
         }
         let type_ = NetworkEndian::read_u16(&rest[0..2]).into();
         let class = NetworkEndian::read_u16(&rest[2..4]);
         let rest = &rest[4..];
 
         if class != CLASS_IN {
-            return Err(Error);
+            return Err(Error::BadPacket);
         }
 
         Ok((rest, Question { name, type_ }))
@@ -338,14 +338,14 @@ impl<'a> RecordData<'a> {
             #[cfg(feature = "proto-ipv4")]
             Type::A => {
                 if data.len() != 4 {
-                    return Err(Error);
+                    return Err(Error::BadPacket);
                 }
                 Ok(RecordData::A(Ipv4Address::from_bytes(data)))
             }
             #[cfg(feature = "proto-ipv6")]
             Type::Aaaa => {
                 if data.len() != 16 {
-                    return Err(Error);
+                    return Err(Error::BadPacket);
                 }
                 Ok(RecordData::Aaaa(Ipv6Address::from_bytes(data)))
             }
@@ -372,7 +372,7 @@ impl<'a> Record<'a> {
         let name = &buffer[..buffer.len() - rest.len()];
 
         if rest.len() < 10 {
-            return Err(Error);
+            return Err(Error::BadPacket);
         }
         let type_ = NetworkEndian::read_u16(&rest[0..2]).into();
         let class = NetworkEndian::read_u16(&rest[2..4]);
@@ -381,10 +381,10 @@ impl<'a> Record<'a> {
         let rest = &rest[10..];
 
         if class != CLASS_IN {
-            return Err(Error);
+            return Err(Error::BadPacket);
         }
 
-        let data = rest.get(..len).ok_or(Error)?;
+        let data = rest.get(..len).ok_or(Error::BadPacket)?;
         let rest = &rest[len..];
 
         Ok((

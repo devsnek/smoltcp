@@ -1,9 +1,9 @@
 // See https://tools.ietf.org/html/rfc2131 for the DHCP specification.
 
+use alloc::vec::Vec;
 use bitflags::bitflags;
 use byteorder::{ByteOrder, NetworkEndian};
 use core::iter;
-use heapless::Vec;
 
 use super::{Error, Result};
 use crate::wire::arp::Hardware;
@@ -73,12 +73,12 @@ impl<'a> DhcpOptionWriter<'a> {
     /// Emit a  [`DhcpOption`] into a [`DhcpOptionWriter`].
     pub fn emit(&mut self, option: DhcpOption<'_>) -> Result<()> {
         if option.data.len() > u8::MAX as _ {
-            return Err(Error);
+            return Err(Error::Truncated);
         }
 
         let total_len = 2 + option.data.len();
         if self.buffer.len() < total_len {
-            return Err(Error);
+            return Err(Error::Truncated);
         }
 
         let (buf, rest) = core::mem::take(&mut self.buffer).split_at_mut(total_len);
@@ -93,7 +93,7 @@ impl<'a> DhcpOptionWriter<'a> {
 
     pub fn end(&mut self) -> Result<()> {
         if self.buffer.is_empty() {
-            return Err(Error);
+            return Err(Error::BadPacket);
         }
 
         self.buffer[0] = field::OPT_END;
@@ -254,7 +254,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
     pub fn check_len(&self) -> Result<()> {
         let len = self.buffer.as_ref().len();
         if len < field::MAGIC_NUMBER.end {
-            Err(Error)
+            Err(Error::BadPacket)
         } else {
             Ok(())
         }
@@ -397,22 +397,22 @@ impl<T: AsRef<[u8]>> Packet<T> {
 
     pub fn get_sname(&self) -> Result<&str> {
         let data = &self.buffer.as_ref()[field::SNAME];
-        let len = data.iter().position(|&x| x == 0).ok_or(Error)?;
+        let len = data.iter().position(|&x| x == 0).ok_or(Error::BadPacket)?;
         if len == 0 {
-            return Err(Error);
+            return Err(Error::BadPacket);
         }
 
-        let data = core::str::from_utf8(&data[..len]).map_err(|_| Error)?;
+        let data = core::str::from_utf8(&data[..len]).map_err(|_| Error::BadPacket)?;
         Ok(data)
     }
 
     pub fn get_boot_file(&self) -> Result<&str> {
         let data = &self.buffer.as_ref()[field::FILE];
-        let len = data.iter().position(|&x| x == 0).ok_or(Error)?;
+        let len = data.iter().position(|&x| x == 0).ok_or(Error::BadPacket)?;
         if len == 0 {
-            return Err(Error);
+            return Err(Error::BadPacket);
         }
-        let data = core::str::from_utf8(&data[..len]).map_err(|_| Error)?;
+        let data = core::str::from_utf8(&data[..len]).map_err(|_| Error::BadPacket)?;
         Ok(data)
     }
 }
@@ -646,7 +646,7 @@ pub struct Repr<'a> {
     /// the client is interested in.
     pub parameter_request_list: Option<&'a [u8]>,
     /// DNS servers
-    pub dns_servers: Option<Vec<Ipv4Address, MAX_DNS_SERVER_COUNT>>,
+    pub dns_servers: Option<Vec<Ipv4Address>>,
     /// The maximum size dhcp packet the interface can receive
     pub max_size: Option<u16>,
     /// The DHCP IP lease duration, specified in seconds.
@@ -720,17 +720,17 @@ impl<'a> Repr<'a> {
         match packet.hardware_type() {
             Hardware::Ethernet => {
                 if packet.hardware_len() != 6 {
-                    return Err(Error);
+                    return Err(Error::BadPacket);
                 }
             }
-            Hardware::Unknown(_) => return Err(Error), // unimplemented
+            Hardware::Unknown(_) => return Err(Error::BadPacket), // unimplemented
         }
 
         if packet.magic_number() != DHCP_MAGIC_NUMBER {
-            return Err(Error);
+            return Err(Error::BadPacket);
         }
 
-        let mut message_type = Err(Error);
+        let mut message_type = Err(Error::BadPacket);
         let mut requested_ip = None;
         let mut client_identifier = None;
         let mut server_identifier = None;
@@ -758,7 +758,7 @@ impl<'a> Repr<'a> {
                 (field::OPT_CLIENT_ID, 7) => {
                     let hardware_type = Hardware::from(u16::from(data[0]));
                     if hardware_type != Hardware::Ethernet {
-                        return Err(Error);
+                        return Err(Error::BadPacket);
                     }
                     client_identifier = Some(EthernetAddress::from_bytes(&data[1..]));
                 }
@@ -791,10 +791,7 @@ impl<'a> Repr<'a> {
                     const IP_ADDR_BYTE_LEN: usize = 4;
                     let mut addrs = data.chunks_exact(IP_ADDR_BYTE_LEN);
                     for chunk in &mut addrs {
-                        // We ignore push failures because that will only happen
-                        // if we attempt to push more than 4 addresses, and the only
-                        // solution to that is to support more addresses.
-                        servers.push(Ipv4Address::from_bytes(chunk)).ok();
+                        servers.push(Ipv4Address::from_bytes(chunk));
                     }
                     dns_servers = Some(servers);
 
